@@ -2,27 +2,40 @@
 # AUTHOR Erick Grau
 # DATE 3-29-2025
 #!/bin/bash
-
 # Determine the current date and month details
 current_day=$(date +%d)
 current_month=$(date +%m)
 current_year=$(date +%Y)
 
-# Define a log file
+# Define log file
 log_file="/var/log/monthly_maintenance.log"
 
-# Send a notification to the user
+# Slack webhook URL (replace with your actual webhook)
+slack_webhook="https://hooks.slack.com/services/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"
+
+# Slack notification function
 send_notification() {
     local subject="$1"
     local message="$2"
-    # Update this with the email or messaging service you use
-    # For example, using mail (requires proper configuration):
-    # echo "$message" | mail -s "$subject" admin@example.com
-    # For now, just log it as a stand-in:
-    echo "Notification: $subject - $message" >> "$log_file"
+    local color="$3"
+
+    payload=$(cat <<EOF
+{
+    "attachments": [
+        {
+            "color": "$color",
+            "title": "$subject",
+            "text": "$message"
+        }
+    ]
+}
+EOF
+)
+
+    curl -X POST -H 'Content-type: application/json' --data "$payload" "$slack_webhook"
 }
 
-# Log function
+# Logging function
 log() {
     echo "$(date +'%Y-%m-%d %H:%M:%S') - $1" >> "$log_file"
 }
@@ -44,18 +57,18 @@ log "Identified last Friday: $last_friday"
 # Compare the current day to the last Friday
 if [ "$current_day" -ne "$last_friday" ]; then
     log "Today is not the last Friday of the month. Exiting."
-    send_notification "Maintenance Skipped" "Today is not the last Friday. No maintenance performed."
+    send_notification "Maintenance Postponed" "Today is not the last Friday. No maintenance performed." "warning"
     exit 0
 fi
 
 # If it’s the last Friday, continue
 log "Today is the last Friday of the month. Proceeding with maintenance tasks."
-send_notification "Maintenance Starting" "Starting monthly maintenance tasks."
+send_notification "Maintenance Starting" "Starting monthly maintenance tasks." "good"
 
 # Check if we need root privileges for certain commands
 if [ "$EUID" -ne 0 ]; then
     log "Please run this script as root."
-    send_notification "Maintenance Failed" "Script needs root privileges. Exiting."
+    send_notification "Maintenance Failed" "Script needs root privileges. Exiting." "danger"
     exit 1
 fi
 
@@ -64,62 +77,62 @@ fi
 # Run periodic maintenance scripts (macOS built-in maintenance)
 if ! sudo periodic daily weekly monthly >> "$log_file" 2>&1; then
     log "Failed to run periodic maintenance."
-    send_notification "Maintenance Error" "Failed during periodic maintenance scripts."
+    send_notification "Maintenance Error" "Failed during periodic maintenance scripts." "danger"
 fi
 
 # Repair the filesystem for the main volume
 if ! diskutil repairvolume / >> "$log_file" 2>&1; then
     log "Failed to repair volume."
-    send_notification "Maintenance Error" "Failed to repair volume."
+    send_notification "Maintenance Error" "Failed to repair volume." "danger"
 fi
 
 # Clear temporary files
 if ! rm -rf /tmp/* >> "$log_file" 2>&1; then
     log "Failed to clear /tmp files."
-    send_notification "Maintenance Error" "Failed to clear temporary files."
+    send_notification "Maintenance Error" "Failed to clear temporary files." "danger"
 fi
 
 # Clear spindump files (used for diagnostic reports)
 if ! rm -rf /var/db/spindump/* >> "$log_file" 2>&1; then
     log "Failed to clear spindump files."
-    send_notification "Maintenance Error" "Failed to clear spindump files."
+    send_notification "Maintenance Error" "Failed to clear spindump files." "danger"
 fi
 
 # Purge inactive memory
 if ! purge >> "$log_file" 2>&1; then
     log "Failed to purge inactive memory."
-    send_notification "Maintenance Error" "Failed to purge inactive memory."
+    send_notification "Maintenance Error" "Failed to purge inactive memory." "danger"
 fi
 
 # Clear system logs
 if ! sudo rm -rf /var/log/* >> "$log_file" 2>&1; then
     log "Failed to clear system logs."
-    send_notification "Maintenance Error" "Failed to clear system logs."
+    send_notification "Maintenance Error" "Failed to clear system logs." "danger"
 fi
 
 # Clear user application caches
 if ! rm -rf ~/Library/Caches/* >> "$log_file" 2>&1; then
     log "Failed to clear user application caches."
-    send_notification "Maintenance Error" "Failed to clear user caches."
+    send_notification "Maintenance Error" "Failed to clear user caches." "danger"
 fi
 
 # Clear system application caches
 if ! rm -rf /Library/Caches/* >> "$log_file" 2>&1; then
     log "Failed to clear system caches."
-    send_notification "Maintenance Error" "Failed to clear system caches."
+    send_notification "Maintenance Error" "Failed to clear system caches." "danger"
 fi
 
 # Check for and install all available macOS updates
 if ! softwareupdate -i -a >> "$log_file" 2>&1; then
     log "Failed to update macOS."
-    send_notification "Maintenance Error" "Failed to update macOS."
+    send_notification "Maintenance Error" "Failed to update macOS." "danger"
 fi
 
 # Check for and install updates for Homebrew and its packages, if Homebrew is installed
 if command -v brew &> /dev/null; then
     if ! brew update >> "$log_file" 2>&1 || ! brew upgrade >> "$log_file" 2>&1 || ! brew cleanup >> "$log_file" 2>&1; then
         log "Failed to update Homebrew or its packages."
-        send_notification "Maintenance Error" "Failed to update Homebrew or its packages."
+        send_notification "Maintenance Error" "Failed to update Homebrew or its packages." "danger"
     fi
 fi
 
@@ -127,17 +140,17 @@ fi
 if command -v npm &> /dev/null; then
     if ! npm update -g >> "$log_file" 2>&1; then
         log "Failed to update global npm packages."
-        send_notification "Maintenance Error" "Failed to update global npm packages."
+        send_notification "Maintenance Error" "Failed to update global npm packages." "danger"
     fi
 fi
 
 # Flush the DNS cache to resolve networking issues
 if ! sudo dscacheutil -flushcache >> "$log_file" 2>&1 || ! sudo killall -HUP mDNSResponder >> "$log_file" 2>&1; then
     log "Failed to flush DNS cache."
-    send_notification "Maintenance Error" "Failed to flush DNS cache."
+    send_notification "Maintenance Error" "Failed to flush DNS cache." "danger"
 fi
 
 # Maintenance complete, initiate a restart.
 log "Addigy monthly maintenance complete. System will restart now."
-send_notification "Maintenance Complete" "Monthly maintenance tasks are complete. Restarting now."
+send_notification "Maintenance Complete" "Monthly maintenance tasks are complete. Restarting now." "good"
 sudo reboot
