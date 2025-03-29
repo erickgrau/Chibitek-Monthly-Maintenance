@@ -11,7 +11,7 @@ current_year=$(date +%Y)
 log_file="/var/log/monthly_maintenance.log"
 
 # Slack webhook URL (replace with your actual webhook)
-slack_webhook="https://hooks.slack.com/services/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"
+slack_webhook="https://hooks.slack.com/services/XXXXXXXXX/XXXXXXXXXXXXX/XXXXXXXXXXXXXXXXXXX"
 
 
 # Slack notification function
