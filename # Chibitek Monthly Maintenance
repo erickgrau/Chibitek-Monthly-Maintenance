@@ -1,6 +1,6 @@
 # Chibitek Monthly Maintenance
 # AUTHOR Erick Grau
-# DATE 8-8-2024
+# DATE 3-29-2025
 #!/bin/bash
 
 # Determine the current date and month details
@@ -8,79 +8,136 @@ current_day=$(date +%d)
 current_month=$(date +%m)
 current_year=$(date +%Y)
 
+# Define a log file
+log_file="/var/log/monthly_maintenance.log"
+
+# Send a notification to the user
+send_notification() {
+    local subject="$1"
+    local message="$2"
+    # Update this with the email or messaging service you use
+    # For example, using mail (requires proper configuration):
+    # echo "$message" | mail -s "$subject" admin@example.com
+    # For now, just log it as a stand-in:
+    echo "Notification: $subject - $message" >> "$log_file"
+}
+
+# Log function
+log() {
+    echo "$(date +'%Y-%m-%d %H:%M:%S') - $1" >> "$log_file"
+}
+
 # Find the last day of the current month
 last_day=$(cal "$current_month" "$current_year" | awk 'NF {DAYS = $NF}; END {print DAYS}')
+log "Determined last day of month: $last_day"
 
 # Identify the last Friday of the month
+last_friday=""
 for ((day=$last_day; day>0; day--)); do
     if [ "$(date -d "$current_year-$current_month-$day" +%u)" -eq 5 ]; then
         last_friday=$day
         break
     fi
 done
+log "Identified last Friday: $last_friday"
 
 # Compare the current day to the last Friday
 if [ "$current_day" -ne "$last_friday" ]; then
-    echo "Today is not the last Friday of the month. Exiting."
+    log "Today is not the last Friday of the month. Exiting."
+    send_notification "Maintenance Skipped" "Today is not the last Friday. No maintenance performed."
     exit 0
 fi
 
 # If it’s the last Friday, continue
-echo "Today is the last Friday of the month. Proceeding with maintenance tasks."
-
-# Start the maintenance tasks
+log "Today is the last Friday of the month. Proceeding with maintenance tasks."
+send_notification "Maintenance Starting" "Starting monthly maintenance tasks."
 
 # Check if we need root privileges for certain commands
 if [ "$EUID" -ne 0 ]; then
-  echo "Please run this script as root."
-  exit 1
+    log "Please run this script as root."
+    send_notification "Maintenance Failed" "Script needs root privileges. Exiting."
+    exit 1
 fi
 
+# Start maintenance tasks
+
 # Run periodic maintenance scripts (macOS built-in maintenance)
-sudo periodic daily weekly monthly
+if ! sudo periodic daily weekly monthly >> "$log_file" 2>&1; then
+    log "Failed to run periodic maintenance."
+    send_notification "Maintenance Error" "Failed during periodic maintenance scripts."
+fi
 
 # Repair the filesystem for the main volume
-diskutil repairvolume /
+if ! diskutil repairvolume / >> "$log_file" 2>&1; then
+    log "Failed to repair volume."
+    send_notification "Maintenance Error" "Failed to repair volume."
+fi
 
 # Clear temporary files
-rm -rf /tmp/*
+if ! rm -rf /tmp/* >> "$log_file" 2>&1; then
+    log "Failed to clear /tmp files."
+    send_notification "Maintenance Error" "Failed to clear temporary files."
+fi
 
 # Clear spindump files (used for diagnostic reports)
-rm -rf /var/db/spindump/*
+if ! rm -rf /var/db/spindump/* >> "$log_file" 2>&1; then
+    log "Failed to clear spindump files."
+    send_notification "Maintenance Error" "Failed to clear spindump files."
+fi
 
 # Purge inactive memory
-purge
+if ! purge >> "$log_file" 2>&1; then
+    log "Failed to purge inactive memory."
+    send_notification "Maintenance Error" "Failed to purge inactive memory."
+fi
 
 # Clear system logs
-sudo rm -rf /var/log/*
+if ! sudo rm -rf /var/log/* >> "$log_file" 2>&1; then
+    log "Failed to clear system logs."
+    send_notification "Maintenance Error" "Failed to clear system logs."
+fi
 
 # Clear user application caches
-rm -rf ~/Library/Caches/*
+if ! rm -rf ~/Library/Caches/* >> "$log_file" 2>&1; then
+    log "Failed to clear user application caches."
+    send_notification "Maintenance Error" "Failed to clear user caches."
+fi
 
 # Clear system application caches
-rm -rf /Library/Caches/*
+if ! rm -rf /Library/Caches/* >> "$log_file" 2>&1; then
+    log "Failed to clear system caches."
+    send_notification "Maintenance Error" "Failed to clear system caches."
+fi
 
 # Check for and install all available macOS updates
-softwareupdate -i -a
+if ! softwareupdate -i -a >> "$log_file" 2>&1; then
+    log "Failed to update macOS."
+    send_notification "Maintenance Error" "Failed to update macOS."
+fi
 
 # Check for and install updates for Homebrew and its packages, if Homebrew is installed
 if command -v brew &> /dev/null; then
-  brew update
-  brew upgrade
-  brew cleanup
+    if ! brew update >> "$log_file" 2>&1 || ! brew upgrade >> "$log_file" 2>&1 || ! brew cleanup >> "$log_file" 2>&1; then
+        log "Failed to update Homebrew or its packages."
+        send_notification "Maintenance Error" "Failed to update Homebrew or its packages."
+    fi
 fi
 
 # Check for and install global npm package updates, if Node.js is installed
 if command -v npm &> /dev/null; then
-  npm update -g
+    if ! npm update -g >> "$log_file" 2>&1; then
+        log "Failed to update global npm packages."
+        send_notification "Maintenance Error" "Failed to update global npm packages."
+    fi
 fi
 
 # Flush the DNS cache to resolve networking issues
-sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
-
-# Optional: Remove old Time Machine backups
-# sudo tmutil delete /path/to/old/backup
+if ! sudo dscacheutil -flushcache >> "$log_file" 2>&1 || ! sudo killall -HUP mDNSResponder >> "$log_file" 2>&1; then
+    log "Failed to flush DNS cache."
+    send_notification "Maintenance Error" "Failed to flush DNS cache."
+fi
 
 # Maintenance complete, initiate a restart.
-echo "Addigy monthly maintenance complete. System will restart now."
+log "Addigy monthly maintenance complete. System will restart now."
+send_notification "Maintenance Complete" "Monthly maintenance tasks are complete. Restarting now."
 sudo reboot
