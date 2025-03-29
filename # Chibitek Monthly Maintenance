@@ -1,0 +1,86 @@
+# Chibitek Monthly Maintenance
+# AUTHOR Erick Grau
+# DATE 8-8-2024
+#!/bin/bash
+
+# Determine the current date and month details
+current_day=$(date +%d)
+current_month=$(date +%m)
+current_year=$(date +%Y)
+
+# Find the last day of the current month
+last_day=$(cal "$current_month" "$current_year" | awk 'NF {DAYS = $NF}; END {print DAYS}')
+
+# Identify the last Friday of the month
+for ((day=$last_day; day>0; day--)); do
+    if [ "$(date -d "$current_year-$current_month-$day" +%u)" -eq 5 ]; then
+        last_friday=$day
+        break
+    fi
+done
+
+# Compare the current day to the last Friday
+if [ "$current_day" -ne "$last_friday" ]; then
+    echo "Today is not the last Friday of the month. Exiting."
+    exit 0
+fi
+
+# If it’s the last Friday, continue
+echo "Today is the last Friday of the month. Proceeding with maintenance tasks."
+
+# Start the maintenance tasks
+
+# Check if we need root privileges for certain commands
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run this script as root."
+  exit 1
+fi
+
+# Run periodic maintenance scripts (macOS built-in maintenance)
+sudo periodic daily weekly monthly
+
+# Repair the filesystem for the main volume
+diskutil repairvolume /
+
+# Clear temporary files
+rm -rf /tmp/*
+
+# Clear spindump files (used for diagnostic reports)
+rm -rf /var/db/spindump/*
+
+# Purge inactive memory
+purge
+
+# Clear system logs
+sudo rm -rf /var/log/*
+
+# Clear user application caches
+rm -rf ~/Library/Caches/*
+
+# Clear system application caches
+rm -rf /Library/Caches/*
+
+# Check for and install all available macOS updates
+softwareupdate -i -a
+
+# Check for and install updates for Homebrew and its packages, if Homebrew is installed
+if command -v brew &> /dev/null; then
+  brew update
+  brew upgrade
+  brew cleanup
+fi
+
+# Check for and install global npm package updates, if Node.js is installed
+if command -v npm &> /dev/null; then
+  npm update -g
+fi
+
+# Flush the DNS cache to resolve networking issues
+sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder
+
+# Optional: Remove old Time Machine backups
+# sudo tmutil delete /path/to/old/backup
+
+# Maintenance complete, initiate a restart.
+echo "Addigy monthly maintenance complete. System will restart now."
+sudo reboot
